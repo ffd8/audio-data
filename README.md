@@ -2,8 +2,8 @@
 
 cc [teddavis.org](https://teddavis.org) 2021
 
-minimal tool to export peaks info from an audio file as .json
-[wavesurfer.js](https://wavesurfer-js.org/) for offline analysis
+minimal tool to export peaks info from an audio file as .json  
+[wavesurfer.js](https://wavesurfer-js.org/) for offline analysis  
 created for usage with [basil.js](http://basiljs.ch)
 	
 ### INSTALL
