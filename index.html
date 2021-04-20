@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>audio-data</title>
+	<script src="https://unpkg.com/wavesurfer.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.3.1/p5.min.js"></script>
+	<style type="text/css">
+		body{
+			margin:0;
+		}
+		a{
+			color:#fff;
+		}
+		canvas{
+			position:fixed;
+			left:0;
+			top:0;
+			z-index:-2;
+		}
+		#waveform{
+			height:1px;
+			visibility:hidden;
+		}
+		#drop_zone {
+		  position:fixed;
+		  width:100vw;
+		  height:100vh;
+		  top:0;
+		  left:0;
+		  z-index:-1;
+		}
+		*{
+			box-sizing: border-box;
+			font-family:"Monaco", sans-serif;
+			font-size:9pt;
+		}
+		#nav{
+			display:flex;
+			position:fixed;
+			width:100vw;
+			height:30px;
+			top:0;
+			color:#fff;
+		}
+		#nav div{
+			margin-right:5px;
+			background:#000;
+			border:1px solid #aaa;
+			border-top:none;
+		}
+		#nav-title{
+		}
+		#nav button{
+			border:none;
+			background:#444;
+			color:#fff;
+			height:100%;
+			outline:none;
+			cursor:pointer;
+		}
+		#nav button:hover{
+			background:#666;
+		}
+		.spacer{
+			margin-left:50px;
+		}
+		#nav-slider{
+			width:300px;
+			display: none;
+		}
+		#nav-slider button{
+			border-right:1px solid #aaa;
+		}
+		#nav-slider-val{
+			float:right;
+			height:100%;
+			border:none !important;
+			padding:5px;
+			border-left:1px solid #aaa !important;
+		}
+		#nav-player-holder{
+			display:none;
+		}
+		#nav-info{
+			display:none;
+			position:absolute;
+			top:35px;
+			background:#444 !important;
+			padding:5px;
+			border-top:1px solid #888 !important;
+			line-height:1.4em;
+		}
+	</style>
+</head>
+<body>
+<div id="nav">
+	<div id="nav-title">
+		<button onclick="toggleInfo();">audio-data v0.1</button>
+		<div id="nav-info" onclick="toggleInfo();">
+ 			 cc <a href="https://teddavis.org" target="_blank">teddavis.org</a> 2021<br><br>
+
+			 minimal tool to export peaks info from an audio file as .json<br>
+			 <a href="https://wavesurfer-js.org/" target="_blank">wavesurfer.js</a> for offline analysis<br>
+			 created for usage with <a href="http://basiljs.ch" target="_blank">basil.js</a><br><br>
+
+			 <u>USAGE</u><br>
+			 - DRAG + DROP MP3/WAV file into browser window (or click LOAD)<br>
+			 - adjust SLIDER for number of peaks to output<br>
+			 - optionally CHECK 'split' to also export LEFT/RIGHT channels<br>
+			 - click EXPORT for .json file with info<br>
+			 - load .json with following structure:<br>
+			<pre style="color:yellow;">
+	{
+	  "info": {
+	    "filename": "...",
+	    "peaksCount": 1000,
+	    "peaksMin": -0.4934861660003662,
+	    "peaksMax": 0.6202539205551147
+	  },
+	  "peaks": {
+	    "merged": [ ... ],
+	    "left": [ *if split* ],
+	    "right": [ *if split* ]
+	  }
+	}
+			</pre>
+		</div>
+	</div>
+	<div>
+		<button onclick="document.getElementById('fileinput').click();" title="LOAD MP3/WAV">LOAD</button>
+	</div>
+	<div id="nav-slider" class="spacer">
+		<button onclick="exportWaves();" title="EXPORT JSON">EXPORT</button>
+		<div id="nav-slider-val" title="SET DETAIL">1000</div>
+	</div>
+
+	<div id="nav-player-holder" class="spacer">
+		<button id="nav-player" onclick="togglePlayer()" title="TOGGLE AUDIO">
+			<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-play"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+		</button>
+	</div>
+</div>
+	<!-- Initialize a div for WaveSurfer -->
+<div id="waveform"></div>
+
+<div id="drop_zone" ondrop="dropHandler(event);" ondragover="dragOverHandler(event);" onmousedown="document.getElementById('fileinput').click();">
+</div>
+
+<!-- Add a file input where the user should drag the file to load into WaveForm -->
+<input type="file" id="fileinput" style="display:none;"/>
+
+<script>
+	let fileinput = document.getElementById('fileinput')
+	let navSlider = document.getElementById('nav-slider')
+	let navSliderVal = document.getElementById('nav-slider-val')
+	let navPlayerHolder = document.getElementById('nav-player-holder')
+	let navPlayer = document.getElementById('nav-player')
+	let navInfo = document.getElementById('nav-info')
+	let filename = "", filenameFull = ""
+
+	let icons = {
+		pause : '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-pause"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>',
+		play : '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-play"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>'
+	}
+
+    // Initialize WaveSurfer
+    var wavesurfer = WaveSurfer.create({
+        container: '#waveform'
+    });
+
+    wavesurfer.on('ready', function () {
+	        background(0)
+	        showWaves()
+	});
+
+	// drop
+	function dropHandler(ev) {
+	  background(0);
+
+	  // Prevent default behavior (Prevent file from being opened)
+	  ev.preventDefault();
+
+	  if (ev.dataTransfer.items) {
+	    // Use DataTransferItemList interface to access the file(s)
+	    for (var i = 0; i < ev.dataTransfer.items.length; i++) {
+	      // If dropped items aren't files, reject them
+	      if (ev.dataTransfer.items[i].kind === 'file') {
+	        var file = ev.dataTransfer.items[i].getAsFile();
+	        // console.log('... file[' + i + '].name = ' + file.name);
+	         parseFile(file);
+	      }
+	    }
+	  } else {
+	    // Use DataTransfer interface to access the file(s)
+	    for (var i = 0; i < ev.dataTransfer.files.length; i++) {
+	      console.log('... file[' + i + '].name = ' + ev.dataTransfer.files[i].name);
+	    }
+	  }
+	}
+
+	function dragOverHandler(ev) {
+	  background(0, 150, 0)
+
+	  // Prevent default behavior (Prevent file from being opened)
+	  ev.preventDefault();
+	}
+
+	function parseFile(file){
+		filename = file.name.split('.').slice(0, -1).join('.')
+		filenameFull = file.name
+		var reader = new FileReader();
+
+            reader.onload = function (evt) {
+                // Create a Blob providing as first argument a typed array with the file buffer
+                var blob = new window.Blob([new Uint8Array(evt.target.result)]);
+
+                // Load the blob into Wavesurfer
+                wavesurfer.loadBlob(blob);
+            };
+
+            reader.onerror = function (evt) {
+                console.error("An error ocurred reading the file: ", evt);
+            };
+
+            // Read File as an ArrayBuffer
+            reader.readAsArrayBuffer(file);
+	}
+
+    // Once the user loads a file in the fileinput, the file should be loaded into waveform
+    fileinput.addEventListener('change', function(e){
+        var file = this.files[0];
+        parseFile(file)
+    }, false);
+
+    function togglePlayer(){
+    	wavesurfer.playPause()
+    	if(wavesurfer.isPlaying()){
+    		navPlayer.innerHTML = icons.pause
+    	}else{
+    		navPlayer.innerHTML = icons.play
+    	}
+    }
+
+    function exportJSON(jsonData, jsonFilename){
+		const jsonStr = JSON.stringify(jsonData, undefined, 2);
+
+		let element = document.createElement('a');
+		element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(jsonStr));
+		element.setAttribute('download', jsonFilename + '.json');
+		element.style.display = 'none';
+		document.body.appendChild(element);
+		element.click();
+		document.body.removeChild(element);
+	}
+
+	let peakRange;
+    function setup(){
+    	createCanvas(windowWidth, windowHeight)
+    	pixelDensity(1)
+    	background(0)
+    	peakRange = createSlider(5, 2000, 250)
+    	peakRange.position(350, 5)
+    	peakRange.size(100)
+    	peakRange.input(function(){
+    		background(0)
+	        showWaves()
+	        navSliderVal.innerHTML = peakRange.value()
+    	})
+
+    	peakSplit = createCheckbox()
+    	peakSplit.position(285, 5)
+    	peakSplit.changed(function(){
+    		showWaves();
+    	})
+    	peakLabel = createDiv('split')
+    	peakLabel.position(305, 7)
+    	peakLabel.style('color', '#fff')
+    	peakLabel.style('font-size', '8pt')
+
+    	guiHide();
+    }
+
+    function draw(){
+
+    }
+
+    function windowResized() {
+		resizeCanvas(windowWidth, windowHeight);
+		background(0)
+		if(navSlider.style.display === 'inline'){
+			showWaves()
+		}
+	}
+
+    function showWaves(){
+    	background(0)
+    	let amp = height/5
+    	guiShow();
+    	stroke(255)
+    	strokeWeight(1)
+
+    	let peaks = wavesurfer.backend.getPeaks(peakRange.value()/2)
+    	let y = height * .5
+    	noFill()
+    	for(let i=0; i < peaks.length; i++){
+    		let peak = peaks[i]
+    		let x = floor(map(i, 0, peaks.length, 150, width))
+    		line(x, y-peak*amp, x, y+peak*amp)
+    	}
+    	drawLabel('PEAKS MERGED', y, color(255))
+
+    	if(peakSplit.checked()){
+    		let peaksSplit = wavesurfer.backend.splitPeaks
+    		for(let j=0; j < peaksSplit.length; j++){
+    			y = (height * .25) * (j*2+1)
+    			if(j > 0){
+    				drawLabel('PEAKS RIGHT', y, color(255, 0, 0))
+    				stroke(255, 0, 0)
+    			}else{
+    				drawLabel('PEAKS LEFT', y, color(0, 0, 255))
+    				stroke(0, 0, 255)
+    			}
+	    		for(let i=0; i < peaksSplit[j].length; i++){
+		    		let peak = peaksSplit[j][i]
+		    		let x = floor(map(i, 0, peaksSplit[j].length, 150, width))
+		    		line(x, y-peak*amp, x, y+peak*amp)
+		    	}
+	    	}
+    	}
+    }
+
+    function drawLabel(txt, y, col){
+    	fill(col)
+    	noStroke()
+    	text(txt, 15, y)
+    }
+
+    function exportWaves(){
+    	let data = {}
+
+    	// calc min/max
+    	let peakMin = 10000
+    	let peakMax = 0
+    	for(let p of wavesurfer.backend.mergedPeaks){
+    		if(p > peakMax){
+    			peakMax = p
+    		}
+    		if(p < peakMin){
+    			peakMin = p
+    		}
+    	}
+
+    	data.info = {
+    		filename: filenameFull,
+    		peaksCount: wavesurfer.backend.mergedPeaks.length,
+    		peaksMin: peakMin,
+    		peaksMax: peakMax
+    	}
+    	data.peaks = {
+    		merged: wavesurfer.backend.mergedPeaks,
+    		// left : wavesurfer.backend.splitPeaks[0],
+    		// right : wavesurfer.backend.splitPeaks[1]
+    	}
+    	if(peakSplit.checked()){
+    		data.peaks.left = wavesurfer.backend.splitPeaks[0]
+    		data.peaks.right = wavesurfer.backend.splitPeaks[1]
+    	}
+    	exportJSON(data, filename)
+    }
+
+    function guiHide(){
+    	peakRange.hide()
+    	peakSplit.hide()
+    	peakLabel.hide()
+    	navSlider.style.display = "none"
+    	navPlayerHolder.style.display = "none"
+    }
+
+    function guiShow(){
+    	peakRange.show()
+    	peakSplit.show()
+    	peakLabel.show()
+    	navSlider.style.display = "inline"
+    	navPlayerHolder.style.display = "inline"
+    }
+
+    function toggleInfo(){
+    	let navInfoDisplay = navInfo.style.display
+    	if(navInfo.style.display !== 'block'){
+    		navInfo.style.display = 'block'
+    	}else{
+    		navInfo.style.display = 'none'
+    	}
+    }
+</script>
+
+</body>
+</html>
